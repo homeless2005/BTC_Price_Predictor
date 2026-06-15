@@ -6,9 +6,7 @@
 
 ---
 
-![展示](/1.png?raw=true)
-
-[![观看演示视频](1.png)](1.mp4)
+https://github.com/user-attachments/assets/184c8e21-c99f-4899-ad56-2d8486dce3e8
 
 ## 📁 项目结构
 
