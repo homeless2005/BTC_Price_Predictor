@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/184c8e21-c99f-4899-ad56-2d8486dce3e8
 ```
 
 ## 🚀 快速开始
-## 🔧 依赖
+### 🔧 依赖
 
 ```
 torch >= 1.10
