@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>₿ BTC/USDT · 分钟K线终端</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #06060b;
+      color: #c8c8c8;
+      font-family: 'Consolas', 'Courier New', monospace;
+      height: 100vh; display: flex; flex-direction: column;
+      overflow: hidden; user-select: none;
+    }
+
+    #matrix-canvas {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      z-index: 0; pointer-events: none; opacity: 0.48;
+    }
+
+    /* ===== Top Bar ===== */
+    .top-bar {
+      position: relative; z-index: 10;
+      background: linear-gradient(180deg, rgba(12,12,22,0.96), rgba(8,8,14,0.92));
+      border-bottom: 1px solid rgba(0,255,255,0.1);
+      padding: 8px 20px; display: flex; justify-content: space-between;
+      align-items: center; font-size: 12px; backdrop-filter: blur(10px);
+    }
+    .pair-info { display: flex; align-items: center; gap: 14px; }
+    .pair-name { font-size: 16px; font-weight: bold; color: #f0b90b; letter-spacing: 1px; }
+    .pair-tf {
+      font-size: 11px; color: #888; background: rgba(255,255,255,0.05);
+      padding: 3px 10px; border-radius: 3px; letter-spacing: 1px;
+    }
+    .last-price { font-size: 18px; font-weight: bold; color: #fff; }
+    .price-change { font-size: 12px; margin-left: 4px; }
+
+    .status-group { display: flex; align-items: center; gap: 14px; }
+    .status-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #666; }
+    .status-item span { color: #aaa; }
+
+    .pause-btn {
+      padding: 7px 16px; font-family: inherit; font-size: 12px;
+      background: rgba(0,0,0,0.5); border: 1px solid rgba(0,255,255,0.2);
+      border-radius: 4px; color: #0ff; cursor: pointer;
+      letter-spacing: 1px; transition: all 0.25s; display: flex; align-items: center; gap: 6px;
+    }
+    .pause-btn:hover { background: rgba(0,255,255,0.08); border-color: rgba(0,255,255,0.4); }
+    .pause-btn.paused { color: #ffaa00; border-color: rgba(255,170,0,0.4); animation: pulse-btn 1.2s infinite; }
+    @keyframes pulse-btn {
+      0%,100% { box-shadow: 0 0 4px rgba(255,170,0,0.15); }
+      50% { box-shadow: 0 0 16px rgba(255,170,0,0.4); }
+    }
+
+    /* ===== Main ===== */
+    .main-container {
+      position: relative; z-index: 10; display: flex; flex: 1;
+      padding: 8px; gap: 8px; min-height: 0;
+    }
+
+    /* ===== Chart Panel ===== */
+    .chart-panel {
+      flex: 3; position: relative; overflow: hidden;
+      background: rgba(5,5,12,0.82); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px; backdrop-filter: blur(6px);
+      box-shadow: inset 0 0 80px rgba(0,0,0,0.6);
+    }
+    .chart-panel svg { width: 100%; height: 100%; display: block; }
+
+    /* Overlay */
+    .pause-overlay {
+      position: absolute; inset: 0; z-index: 30; pointer-events: none;
+      background: rgba(0,0,0,0.5); display: flex; align-items: center;
+      justify-content: center; opacity: 0; transition: opacity 0.3s;
+    }
+    .pause-overlay.active { opacity: 1; }
+    .pause-overlay-text {
+      font-size: 42px; font-weight: bold; letter-spacing: 10px;
+      color: rgba(255,170,0,0.6); text-shadow: 0 0 40px rgba(255,170,0,0.4);
+      border: 2px solid rgba(255,170,0,0.25); padding: 12px 36px;
+      border-radius: 6px; background: rgba(0,0,0,0.4);
+    }
+
+    /* Tooltip */
+    .chart-tooltip {
+      position: absolute; pointer-events: none; z-index: 40; display: none;
+      background: rgba(10,10,18,0.94); border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 6px; padding: 10px 14px; font-size: 11px;
+      font-family: 'Consolas', monospace; color: #bbb; line-height: 1.65;
+    }
+    .chart-tooltip .tt-p { color: #fff; font-size: 15px; font-weight: bold; }
+    .chart-tooltip .tt-up { color: #26a69a; }
+    .chart-tooltip .tt-dn { color: #ef5350; }
+
+    /* ===== Telemetry Panel ===== */
+    .telemetry-panel {
+      flex: 1; min-width: 260px; max-width: 320px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .legend-strip {
+      display: flex; gap: 16px; padding: 7px 12px; font-size: 11px;
+      color: #555; background: rgba(12,12,20,0.5); border-radius: 4px;
+      align-items: center;
+    }
+    .legend-dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 4px; }
+    .legend-dot.bull { background: #26a69a; box-shadow: 0 0 5px rgba(38,166,154,0.4); }
+    .legend-dot.bear { background: #ef5350; box-shadow: 0 0 5px rgba(239,83,80,0.4); }
+    .legend-dot.line-pred { background: #ff44ff; border-radius: 50%; }
+
+    .card {
+      background: rgba(14,14,22,0.7); border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 5px; padding: 12px 14px; backdrop-filter: blur(6px);
+    }
+    .card.ohlc   { border-left: 3px solid #26a69a; }
+    .card.pred   { border-left: 3px solid #ff00ff; }
+    .card.error  { border-left: 3px solid #ef5350; }
+    .card.sys    { border-left: 3px solid rgba(255,255,255,0.08); }
+    .card-label { font-size: 10px; color: #555; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 5px; }
+    .card-value { font-size: 26px; font-weight: bold; font-family: 'Courier New', monospace; }
+    .card-value.c-cyan  { color: #00e5ff; text-shadow: 0 0 10px rgba(0,229,255,0.3); }
+    .card-value.c-pink  { color: #ff00ff; text-shadow: 0 0 10px rgba(255,0,255,0.3); }
+    .card-value.c-red   { color: #ef5350; }
+    .card-value.c-white { color: #ccc; font-size: 20px; }
+    .card-sub { display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-top: 5px; }
+    .card-sub .hl { color: #888; }
+
+    /* ===== SVG ===== */
+    .grid line { stroke: rgba(255,255,255,0.035); stroke-width: 1px; }
+    .grid path { stroke-width: 0; }
+    .axis text { fill: #444; font-size: 10px; font-family: monospace; }
+    .axis path, .axis line { stroke: rgba(255,255,255,0.06); }
+
+    .candle-body { stroke-width: 0; }
+    .candle-wick { stroke-width: 1.2px; }
+    .candle-bull .candle-body { fill: #26a69a; }
+    .candle-bull .candle-wick { stroke: #26a69a; }
+    .candle-bear .candle-body { fill: #ef5350; }
+    .candle-bear .candle-wick { stroke: #ef5350; }
+
+    .line-pred {
+      fill: none; stroke: #ff44ff; stroke-width: 2.5px; stroke-linejoin: round;
+    }
+    .dot-pred { fill: #ff44ff; }
+
+    .vol-bull { fill: rgba(38,166,154,0.5); }
+    .vol-bear { fill: rgba(239,83,80,0.4); }
+
+    /* Watermark */
+    .chart-watermark {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      font-size: 72px; font-weight: bold; color: rgba(255,255,255,0.015);
+      pointer-events: none; z-index: 5; letter-spacing: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="matrix-canvas"></canvas>
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div class="pair-info">
+      <span class="pair-name">₿ BTC/USDT</span>
+      <span class="pair-tf">1m</span>
+      <span class="last-price" id="live-price">0.00</span>
+      <span class="price-change" id="price-change"></span>
+    </div>
+    <div class="status-group">
+      <span class="status-item">核心 <span id="model-badge">[---]</span></span>
+      <span style="color:#333;">│</span>
+      <span class="status-item">进度 <span id="progress-text">0%</span></span>
+      <span style="color:#333;">│</span>
+      <span class="status-item">链路 <span id="status-text" style="color:#ff3333;">OFFLINE</span></span>
+      <div id="led" style="width:7px;height:7px;border-radius:50%;background:#ff3333;box-shadow:0 0 6px #ff3333;"></div>
+      <span style="color:#333;">│</span>
+      <button class="pause-btn" id="pause-btn" onclick="togglePause()">▶ LIVE</button>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main-container">
+    <div class="chart-panel" id="chart-container">
+      <div class="chart-watermark">BTC/USDT</div>
+      <div class="pause-overlay" id="pause-overlay">
+        <div class="pause-overlay-text">⏸ PAUSED</div>
+      </div>
+      <div class="chart-tooltip" id="chart-tooltip"></div>
+    </div>
+
+    <div class="telemetry-panel">
+      <div class="legend-strip">
+        <span><span class="legend-dot bull"></span>阳线</span>
+        <span><span class="legend-dot bear"></span>阴线</span>
+        <span><span class="legend-dot line-pred"></span>预测</span>
+      </div>
+
+      <div class="card ohlc">
+        <div class="card-label">▸ OHLC 真实价格</div>
+        <div class="card-value c-cyan" id="val-close">0.00</div>
+        <div class="card-sub">
+          <span>O <span class="hl" id="val-open">-</span></span>
+          <span>H <span class="hl" id="val-high">-</span></span>
+          <span>L <span class="hl" id="val-low">-</span></span>
+          <span>C <span class="hl" id="val-close-sub">-</span></span>
+        </div>
+      </div>
+
+      <div class="card pred">
+        <div class="card-label">▸ 神经网络预测</div>
+        <div class="card-value c-pink" id="val-predict">0.00</div>
+        <div class="card-sub"><span>时间 <span class="hl" id="val-time">-</span></span></div>
+      </div>
+
+      <div class="card error">
+        <div class="card-label">▸ 误差 |真实−预测|</div>
+        <div class="card-value c-red" id="val-error">0.00</div>
+        <div class="card-sub">
+          <span>比率 <span class="hl" id="val-error-pct">0%</span></span>
+          <span>100均 <span class="hl" id="val-error-avg">0</span></span>
+        </div>
+      </div>
+
+      <div class="card sys">
+        <div class="card-label">▸ 系统</div>
+        <div class="card-value c-white" id="val-latency">0 ms</div>
+        <div class="card-sub">
+          <span>量 <span class="hl" id="val-volume">0 BTC</span></span>
+          <span id="val-count" style="color:#444;">0 根</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <script>
+    // ============================================================
+    // 0. State
+    // ============================================================
+    const MAX = 200;
+    const VOL_R = 0.18;
+    let buf = [];
+    let paused = false;
+    let skipped = 0;
+    let needsRedraw = false;
+    let prevClose = null;
+
+    // ============================================================
+    // 1. Matrix Rain
+    // ============================================================
+    (function matrix() {
+      const c = document.getElementById('matrix-canvas');
+      const ctx = c.getContext('2d');
+      const fs = 14;
+      let cols, drops;
+      function resize() { c.width = innerWidth; c.height = innerHeight; initDrops(); }
+      function initDrops() { cols = Math.floor(c.width / fs); drops = Array.from({length: cols}, () => Math.random() * c.height); }
+      resize(); window.addEventListener('resize', () => { resize(); });
+      const ch = '01';
+      (function loop() {
+        ctx.fillStyle = 'rgba(5,5,10,0.06)'; ctx.fillRect(0, 0, c.width, c.height);
+        ctx.font = `bold ${fs}px Consolas,monospace`;
+        for (let i = 0; i < drops.length; i++) {
+          if (Math.random() > 0.88) continue;
+          const r = Math.random();
+          if (r > 0.7) { ctx.fillStyle = '#44ff66'; ctx.shadowColor = '#44ff66'; ctx.shadowBlur = 10; }
+          else if (r > 0.4) { ctx.fillStyle = '#22dd44'; ctx.shadowColor = '#22dd44'; ctx.shadowBlur = 5; }
+          else { ctx.fillStyle = '#009933'; ctx.shadowBlur = 0; }
+          ctx.fillText(ch[Math.random() > 0.5 ? 0 : 1], i * fs, drops[i] * fs);
+          ctx.shadowBlur = 0;
+          drops[i] += 0.35 + Math.random() * 1.3;
+          if (drops[i] * fs > c.height && Math.random() > 0.955) drops[i] = 0;
+        }
+        requestAnimationFrame(loop);
+      })();
+    })();
+
+    // ============================================================
+    // 2. D3 Chart Init
+    // ============================================================
+    const container = document.getElementById('chart-container');
+    const tooltipEl = document.getElementById('chart-tooltip');
+    const margin = { top: 10, right: 12, bottom: 26, left: 64 };
+    let W, H, iW, iH, chH, vH, vTop;
+
+    function dims() {
+      W = container.clientWidth; H = container.clientHeight;
+      iW = W - margin.left - margin.right; iH = H - margin.top - margin.bottom;
+      chH = iH * (1 - VOL_R); vH = iH * VOL_R; vTop = chH + 4;
+    }
+    dims();
+
+    const svg = d3.select('#chart-container').append('svg').attr('width', W).attr('height', H);
+    const xS = d3.scaleLinear().domain([0, MAX - 1]).range([0, iW]);
+    let yMin = 0, yMax = 100000, vMax = 1;
+    const yS = d3.scaleLinear().domain([yMin, yMax]).range([chH, 0]);
+    const yVS = d3.scaleLinear().domain([0, vMax]).range([vH, 0]);
+
+    const gMain = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const gGridP = gMain.append('g').attr('class', 'grid');
+    const gVol = gMain.append('g').attr('transform', `translate(0,${vTop})`);
+    const gYPrice = gMain.append('g').attr('class', 'axis');
+    const gYVol = gMain.append('g').attr('class', 'axis').attr('transform', `translate(0,${vTop})`);
+    const gX = gMain.append('g').attr('class', 'axis').attr('transform', `translate(0,${vTop + vH + 2})`);
+
+    const gCandles = gMain.append('g');
+    const gVolBars = gVol.append('g');
+    const pathPred = gMain.append('path').attr('class', 'line-pred');
+    const gDotP = gMain.append('g');
+
+    const sep = gMain.append('line')
+      .attr('x1',0).attr('x2',iW).attr('y1',vTop).attr('y2',vTop)
+      .attr('stroke','rgba(255,255,255,0.05)').attr('stroke-width',1);
+
+    function initAxes() {
+      gGridP.call(d3.axisLeft(yS).ticks(8).tickSize(-iW).tickFormat(''));
+      gYPrice.call(d3.axisLeft(yS).ticks(8).tickFormat(d => '$'+d3.format(',.0f')(d)));
+      gYVol.call(d3.axisRight(yVS).ticks(3).tickFormat(d => d>=1000?(d/1000).toFixed(0)+'K':d3.format(',.0f')(d)));
+      gX.call(d3.axisBottom(xS).ticks(8).tickFormat(''));
+    }
+    initAxes();
+
+    // ============================================================
+    // 3. Y-axis auto-scale
+    // ============================================================
+    function updateY() {
+      if (buf.length < 2) return;
+      const all = [];
+      buf.forEach(d => { all.push(d.ch1_actual, d.high, d.low, d.ch2_predict); });
+      const vals = all.filter(v => v != null && !isNaN(v));
+      if (!vals.length) return;
+      const mn = Math.min(...vals), mx = Math.max(...vals);
+      const pad = (mx - mn) * 0.08 || mx * 0.02;
+      const nMin = mn - pad, nMax = mx + pad;
+      const vols = buf.map(d => d.volume||0).filter(v => !isNaN(v));
+      const nVMax = (Math.max(...vols, 1)) * 1.5;
+
+      if (Math.abs(nMin - yMin) > 0.5 || Math.abs(nMax - yMax) > 0.5) {
+        yMin = nMin; yMax = nMax; yS.domain([yMin, yMax]);
+        gYPrice.call(d3.axisLeft(yS).ticks(8).tickFormat(d => '$'+d3.format(',.0f')(d)));
+        gGridP.call(d3.axisLeft(yS).ticks(8).tickSize(-iW).tickFormat(''));
+      }
+      if (Math.abs(nVMax - vMax) > 0.1) {
+        vMax = nVMax; yVS.domain([0, vMax]);
+        gYVol.call(d3.axisRight(yVS).ticks(3).tickFormat(d => d>=1000?(d/1000).toFixed(0)+'K':d3.format(',.0f')(d)));
+      }
+    }
+
+    // ============================================================
+    // 4. Candles
+    // ============================================================
+    function drawCandles() {
+      const cW = Math.max(1, (iW / MAX) * 0.6);
+      const sel = gCandles.selectAll('g.c').data(buf, (_, i) => i);
+      sel.exit().remove();
+      const enter = sel.enter().append('g').attr('class', 'c');
+      enter.append('line').attr('class', 'candle-wick');
+      enter.append('rect').attr('class', 'candle-body');
+      // tooltips only on enter
+      enter.on('mousemove', function(ev, d) {
+        const bull = d.ch1_actual >= d.open;
+        tooltipEl.style.display = 'block'
+          .html(`<div style="color:#666;margin-bottom:3px;">${d.timestamp||''}</div>
+            <div class="tt-p">$${d3.format(',.2f')(d.ch1_actual)}</div>
+            <div>O <span style="color:#aaa;">$${d3.format(',.2f')(d.open)}</span> &nbsp;H <span class="tt-up">$${d3.format(',.2f')(d.high)}</span> &nbsp;L <span class="tt-dn">$${d3.format(',.2f')(d.low)}</span></div>
+            <div style="color:${bull?'#26a69a':'#ef5350'};">${bull?'▲':'▼'} $${d3.format(',.2f')(Math.abs(d.ch1_actual-d.open))}</div>
+            <div>真实 <span style="color:#00e5ff;">$${d3.format(',.2f')(d.ch1_actual)}</span> &nbsp;预测 <span style="color:#ff00ff;">$${d3.format(',.2f')(d.ch2_predict)}</span></div>`)
+          .style('left', (ev.offsetX+16)+'px').style('top', (ev.offsetY-70)+'px');
+      }).on('mouseout', () => { tooltipEl.style.display = 'none'; });
+
+      const all = enter.merge(sel);
+      all.attr('transform', (_, i) => `translate(${xS(i) - cW/2},0)`);
+      all.each(function(d) {
+        const g = d3.select(this);
+        const bull = d.ch1_actual >= d.open;
+        g.classed('candle-bull', bull).classed('candle-bear', !bull);
+        const oY = yS(d.open), cY = yS(d.ch1_actual), hY = yS(d.high), lY = yS(d.low);
+        g.select('.candle-wick').attr('x1',cW/2).attr('y1',hY).attr('x2',cW/2).attr('y2',lY);
+        g.select('.candle-body').attr('x',0).attr('y',Math.min(oY,cY)).attr('width',cW).attr('height',Math.max(1,Math.abs(cY-oY)));
+      });
+    }
+
+    // ============================================================
+    // 5. Predict Line
+    // ============================================================
+    const linePred = d3.line().x((_,i)=>xS(i)).y(d=>yS(d.ch2_predict)).defined(d=>d.ch2_predict!=null&&!isNaN(d.ch2_predict)).curve(d3.curveMonotoneX);
+
+    function drawLine() {
+      pathPred.datum(buf).attr('d', linePred);
+      // endpoint dot
+      const valid = buf.filter(d=>d.ch2_predict!=null&&!isNaN(d.ch2_predict));
+      const last = valid.length ? [valid[valid.length-1]] : [];
+      const dots = gDotP.selectAll('circle').data(last);
+      dots.exit().remove();
+      dots.enter().append('circle').attr('class','dot-pred').attr('r',4)
+        .merge(dots)
+        .attr('cx', d => xS(buf.indexOf(d)))
+        .attr('cy', d => yS(d.ch2_predict));
+    }
+
+    // ============================================================
+    // 6. Volume
+    // ============================================================
+    function drawVol() {
+      const bW = Math.max(1, (iW / MAX) * 0.7);
+      const bars = gVolBars.selectAll('rect').data(buf, (_, i) => i);
+      bars.exit().remove();
+      bars.enter().append('rect')
+        .merge(bars)
+        .attr('x',(_,i)=>xS(i)-bW/2)
+        .attr('y',d=>yVS(d.volume||0))
+        .attr('width',bW)
+        .attr('height',d=>Math.max(0.5, vH - yVS(d.volume||0)))
+        .attr('class',d=>(d.ch1_actual>=d.open)?'vol-bull':'vol-bear');
+    }
+
+    // ============================================================
+    // 7. Render
+    // ============================================================
+    function redraw() {
+      if (paused) { needsRedraw = true; return; }
+      needsRedraw = false;
+      updateY();
+      drawCandles();
+      drawLine();
+      drawVol();
+      document.getElementById('val-count').textContent = buf.length + ' 根';
+    }
+
+    // ============================================================
+    // 8. Pause
+    // ============================================================
+    function togglePause() {
+      paused = !paused;
+      const b = document.getElementById('pause-btn');
+      const o = document.getElementById('pause-overlay');
+      if (paused) {
+        b.innerHTML = '⏸ PAUSED'; b.classList.add('paused');
+        o.classList.add('active'); skipped = 0;
+      } else {
+        b.innerHTML = '▶ LIVE'; b.classList.remove('paused');
+        o.classList.remove('active');
+        if (needsRedraw) redraw();
+      }
+    }
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); togglePause(); }
+    });
+
+    window.addEventListener('resize', () => {
+      dims();
+      xS.range([0, iW]); yS.range([chH, 0]); yVS.range([vH, 0]);
+      sep.attr('x2', iW).attr('y1', vTop).attr('y2', vTop);
+      gX.attr('transform', `translate(0,${vTop+vH+2})`);
+      gVol.attr('transform', `translate(0,${vTop})`);
+      gYVol.attr('transform', `translate(0,${vTop})`);
+      initAxes(); redraw();
+    });
+
+    // ============================================================
+    // 9. Telemetry
+    // ============================================================
+    const D = {
+      close:   document.getElementById('val-close'),
+      closeSub:document.getElementById('val-close-sub'),
+      predict: document.getElementById('val-predict'),
+      error:   document.getElementById('val-error'),
+      errPct:  document.getElementById('val-error-pct'),
+      errAvg:  document.getElementById('val-error-avg'),
+      latency: document.getElementById('val-latency'),
+      volume:  document.getElementById('val-volume'),
+      model:   document.getElementById('model-badge'),
+      status:  document.getElementById('status-text'),
+      led: document.getElementById('led'),
+      progress:document.getElementById('progress-text'),
+      time:    document.getElementById('val-time'),
+      open:    document.getElementById('val-open'),
+      high:    document.getElementById('val-high'),
+      low:     document.getElementById('val-low'),
+      livePrice:document.getElementById('live-price'),
+      priceChg: document.getElementById('price-change'),
+    };
+
+    function F(n, d) { return n.toLocaleString('en-US', {minimumFractionDigits:d,maximumFractionDigits:d}); }
+
+    function updateTelemetry(p) {
+      D.livePrice.textContent = '$' + F(p.ch1_actual||0, 2);
+      if (prevClose !== null) {
+        const chg = p.ch1_actual - prevClose;
+        const chgPct = prevClose > 0 ? (chg / prevClose * 100) : 0;
+        D.priceChg.textContent = (chg >= 0 ? '▲' : '▼') + ' ' + F(Math.abs(chg), 2) + ' (' + F(Math.abs(chgPct), 2) + '%)';
+        D.priceChg.style.color = chg >= 0 ? '#26a69a' : '#ef5350';
+      }
+      prevClose = p.ch1_actual;
+
+      D.close.textContent = '$' + F(p.ch1_actual||0, 2);
+      D.closeSub.textContent = '$' + F(p.ch1_actual||0, 2);
+      D.predict.textContent = '$' + F(p.ch2_predict||0, 2);
+      D.error.textContent = '$' + (p.error_abs||0).toFixed(2);
+      D.errPct.textContent = (p.error_pct||0).toFixed(4) + '%';
+      D.errAvg.textContent = '$' + (p.error_avg_100||0).toFixed(2);
+      D.latency.textContent = (p.latency_ms||0).toFixed(1) + ' ms';
+      D.volume.textContent = (p.volume||0).toFixed(4) + ' BTC';
+      D.time.textContent = p.timestamp||'-';
+      D.open.textContent = '$' + F(p.open||0, 2);
+      D.high.textContent = '$' + F(p.high||0, 2);
+      D.low.textContent = '$' + F(p.low||0, 2);
+      D.model.textContent = '[' + (p.model_type||'?') + ']';
+      D.progress.textContent = (p.progress_pct||0).toFixed(1) + '%';
+    }
+
+    // ============================================================
+    // 10. WebSocket
+    // ============================================================
+    function connect() {
+      const ws = new WebSocket('ws://127.0.0.1:8765');
+      ws.onopen = () => {
+        D.status.textContent = 'ACTIVE'; D.status.style.color = '#00ff88';
+        D.led.style.background = '#00ff88'; D.led.style.boxShadow = '0 0 10px #00ff88, 0 0 20px rgba(0,255,136,0.4)';
+      };
+      ws.onmessage = (ev) => {
+        const p = JSON.parse(ev.data);
+        if (paused) {
+          skipped++;
+          if (skipped % 50 === 0) document.getElementById('val-count').textContent = '⏸ +' + skipped;
+          return;
+        }
+        updateTelemetry(p);
+        buf.push(p);
+        if (buf.length > MAX) buf.shift();
+        if (!needsRedraw) { needsRedraw = true; requestAnimationFrame(redraw); }
+      };
+      ws.onclose = () => {
+        D.status.textContent = 'OFFLINE'; D.status.style.color = '#ff3333';
+        D.led.style.background = '#ff3333'; D.led.style.boxShadow = '0 0 6px #ff3333';
+        setTimeout(connect, 3000);
+      };
+      ws.onerror = () => { D.status.textContent = 'ERR'; D.status.style.color = '#ffaa00'; };
+    }
+    connect();
+  </script>
+</body>
+</html>
