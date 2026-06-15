@@ -1,7 +1,7 @@
 # ₿ BTC Price Predictor
 
 
-**使用神经网络实时进行比特币价格预测** — 使用 RNN / GRU / LSTM 预测 BTC 下一分钟收盘价，WebSocket 实时推送到网页前端。
+**使用神经网络实时进行比特币价格预测** — 使用 RNN / GRU / LSTM 预测 BTC 下一分钟收盘价，WebSocket 实时推送到网页前端显示。
 
 
 ---
@@ -105,8 +105,6 @@ python btc_server.py --model GRU         # 使用 GRU
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--days` | `365` | 下载从今天往前 N 天的比特币真实数据 |
-| `--start` | — | 起始日期 `YYYY-MM-DD` |
-| `--end` | — | 结束日期 `YYYY-MM-DD` |
 | `--output` | `train_loss/btc_1min_1year.csv` | 输出路径 |
 
 ### `btc_train.py`
