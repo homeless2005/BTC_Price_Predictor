@@ -1,7 +1,7 @@
 # ₿ BTC Price Predictor
 
 
-**使用神经网络实时进行比特币价格预测** — 使用 RNN / GRU / LSTM 预测 BTC 下一分钟收盘价，WebSocket 实时推送到网页前端显示。  <br><br><br>
+**使用神经网络实时进行比特币价格预测** — 使用 RNN / GRU / LSTM 预测 BTC 下一分钟收盘价，WebSocket 实时推送到网页前端显示。  
 
 ---
 
